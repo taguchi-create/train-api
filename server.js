@@ -1,5 +1,6 @@
 const express = require("express");
-const puppeteer = require("puppeteer");
+const axios = require("axios");
+const cheerio = require("cheerio");
 const cors = require("cors");
 
 const app = express();
@@ -7,62 +8,68 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3000;
 
-const URL = "https://transit.yahoo.co.jp/station/time/20567/?gid=90";
+/*
+  駅探（恵み野）
+*/
+const URL =
+"https://ekitan.com/timetable/railway/line-station/111-31/d1";
 
-app.get("/api/train", async (req, res) => {
+/*
+  時刻抽出
+*/
+function parseTimes(html){
+
+  const $ = cheerio.load(html);
+
+  const list = [];
+
+  $(".time").each((i, el)=>{
+
+    const t = $(el).text().trim();
+
+    if(t.match(/^\d{2}:\d{2}$/)){
+      list.push(t);
+    }
+
+  });
+
+  return list;
+}
+
+/*
+  次の2本
+*/
+function getNextTwo(list){
+
+  const now = new Date();
+  const current = now.getHours()*60 + now.getMinutes();
+
+  const result = [];
+
+  for(const t of list){
+
+    const [h,m] = t.split(":").map(Number);
+    const total = h*60 + m;
+
+    if(total >= current){
+      result.push(t);
+    }
+
+    if(result.length >= 2) break;
+  }
+
+  return result.length ? result : ["--:--","--:--"];
+}
+
+app.get("/api/train", async (req, res)=>{
 
   try{
 
-    const browser = await puppeteer.launch({
-  headless: "new",
-  args: [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage"
-  ]
-});
+    const response = await axios.get(URL);
 
-    const page = await browser.newPage();
+    const list = parseTimes(response.data);
 
-    await page.goto(URL, { waitUntil: "networkidle2" });
-
-    // 時刻取得
-    const times = await page.evaluate(() => {
-
-      const result = [];
-
-      document.querySelectorAll("li").forEach(el => {
-
-        const t = el.innerText;
-
-        if(t.match(/^\d{2}:\d{2}/)){
-          result.push(t.substring(0,5));
-        }
-
-      });
-
-      return result;
-
-    });
-
-    await browser.close();
-
-    const now = new Date();
-    const current = now.getHours()*60 + now.getMinutes();
-
-    const next = [];
-
-    for(const t of times){
-
-      const [h,m] = t.split(":").map(Number);
-      const total = h*60 + m;
-
-      if(total >= current){
-        next.push(t);
-      }
-
-      if(next.length >= 2) break;
-    }
+    const next = getNextTwo(list);
 
     res.json({
       sapporo: next,
@@ -86,4 +93,8 @@ app.get("/api/train", async (req, res) => {
 
 });
 
-app.listen(PORT, ()=>console.log("OK"));
+app.listen(PORT, ()=>{
+
+  console.log("Server running");
+
+});
