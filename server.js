@@ -4,106 +4,103 @@ const cheerio = require("cheerio");
 const cors = require("cors");
 
 const app = express();
-
 app.use(cors());
 
 const PORT = process.env.PORT || 3000;
 
 /*
-  Yahoo路線情報
-  恵み野駅
+  恵み野 → 札幌方面
 */
-
-const URL =
+const URL_SAPPORO =
 "https://transit.yahoo.co.jp/station/time/20567/?gid=90";
+
+/*
+  恵み野 → 千歳・苫小牧方面
+*/
+const URL_DOWN =
+"https://transit.yahoo.co.jp/station/time/20567/?gid=91";
+
+function parseTimes(html){
+
+  const $ = cheerio.load(html);
+
+  const list = [];
+
+  /*
+    Yahooは dt/dd 構造
+  */
+
+  $("dt").each((i,el)=>{
+
+    const hour = $(el).text().trim();
+
+    const next = $(el).next("dd");
+
+    next.find("li").each((i2,li)=>{
+
+      const minute = $(li).find(".minute").text().trim();
+
+      if(minute){
+
+        list.push(`${hour}:${minute}`);
+
+      }
+
+    });
+
+  });
+
+  return list;
+}
+
+function getNextTwo(list){
+
+  const now = new Date();
+  const current = now.getHours()*60 + now.getMinutes();
+
+  const result = [];
+
+  for(const t of list){
+
+    const [h,m] = t.split(":").map(Number);
+
+    const total = h*60 + m;
+
+    if(total >= current){
+
+      result.push(t);
+
+    }
+
+    if(result.length >= 2) break;
+  }
+
+  return result.length ? result : ["--:--","--:--"];
+}
 
 app.get("/api/train", async(req,res)=>{
 
   try{
 
-    const response =
-      await axios.get(URL);
+    const up = await axios.get(URL_SAPPORO);
+    const down = await axios.get(URL_DOWN);
 
-    const $ =
-      cheerio.load(response.data);
-
-    /*
-      時刻抽出
-    */
-
-    const times = [];
-
-    $(".time").each((i,el)=>{
-
-      const t =
-        $(el).text().trim();
-
-      if(t.match(/^\d{2}$/)){
-
-        times.push(t);
-      }
-
-    });
-
-    /*
-      現在時刻
-    */
-
-    const now = new Date();
-
-    const current =
-      now.getHours()*60 + now.getMinutes();
-
-    const list = [];
-
-    for(let i=0;i<times.length;i+=2){
-
-      const hh = times[i];
-      const mm = times[i+1];
-
-      if(!hh || !mm) continue;
-
-      const time =
-        `${hh}:${mm}`;
-
-      const [h,m] =
-        time.split(":").map(Number);
-
-      const total =
-        h*60+m;
-
-      if(total >= current){
-
-        list.push(time);
-
-      }
-
-    }
+    const upList = parseTimes(up.data);
+    const downList = parseTimes(down.data);
 
     res.json({
 
-      sapporo:[
-        list[0] || "--:--",
-        list[1] || "--:--"
-      ],
+      sapporo: getNextTwo(upList),
+      chitose: getNextTwo(downList),
+      tomakomai: getNextTwo(downList),
 
-      chitose:[
-        list[2] || "--:--",
-        list[3] || "--:--"
-      ],
-
-      tomakomai:[
-        list[4] || "--:--",
-        list[5] || "--:--"
-      ],
-
-      delay:false
+      delay: false
 
     });
 
-  }catch(err){
+  }catch(e){
 
-    console.log(err);
+    console.log(e);
 
     res.json({
 
@@ -118,8 +115,8 @@ app.get("/api/train", async(req,res)=>{
 
 });
 
-app.listen(PORT,()=>{
+app.listen(PORT, ()=>{
 
-  console.log("Server Start");
+  console.log("Server running");
 
 });
